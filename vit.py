@@ -35,23 +35,26 @@ class MHDPAttention(nn.Module):
 class ViT(nn.Module):
 	patch_size: int
 	out_features: int
-	dim: int = 192
-	depth: int = 12
-	num_heads: int = 12
-	dim_heads: int = 768
-	dim_ff: int = 3072
+	dim: int
+	depth: int
+	num_heads: int
+	dim_heads: int
+	dim_ff: int
 
 	@nn.compact
 	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
 		P = self.patch_size
-		out = nn.Conv(self.dim, kernel_size=(P, P), strides=P, use_bias=False)(inputs)
+		out = nn.Conv(self.dim, kernel_size=(P, P), strides=P, use_bias=False)(inputs) # patchify
 		out = out.reshape(out.shape[0], -1, out.shape[3]) # [B, H, W, E] -> [B, L, E]
-		pe = self.param('pe', nn.initializers.uniform(), (1, *out.shape[-2:])) # position embedding
+		pe = self.param('pe', nn.initializers.uniform(), (1, *out.shape[-2:]))
 		out = out + pe
 		out = nn.Sequential([
 			*(nn.Sequential([
 				ResidualPreNorm(MHDPAttention(self.dim_heads, self.num_heads)),
 				ResidualPreNorm(FeedForward(self.dim_ff))
 			]) for d in range(self.depth))])(out)
+		out = out[:, 0]
+		out = nn.Dense(self.dim_ff)(out)
+		out = nn.tanh(out)
 		out = nn.Dense(self.out_features)(out)
 		return out
