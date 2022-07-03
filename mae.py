@@ -37,22 +37,27 @@ class MAE(nn.Module):
 	key: jrnd.KeyArray
 	patch_size: int
 	masking_ratio: float
-	dim: int
 	depth: int
+	width: int
 	num_heads: int
 	dim_heads: int
 	dim_ffn: int
+	dec_depth: int
+	dec_width: int
+	dec_heads: int
 
 	@nn.compact
 	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
+		B, H, W, C = inputs.shape
 		P = self.patch_size
-		out = nn.Conv(self.dim, (P, P), strides=P, use_bias=False)(inputs)
+		out = nn.Conv(self.width, (P, P), strides=P, use_bias=False)(inputs)
 		out = out.reshape(out.shape[0], -1, out.shape[3]) # [B, H, W, E] -> [B, P, E]
-		ct = self.param('ct', nn.initializers.xavier_uniform(), (1, 1, self.dim)) # class token
-		mt = self.param('mt', nn.initializers.xavier_uniform(), (1, 1, self.dim)) # mask token
-		pe = self.param('pe', nn.initializers.xavier_uniform(), (1, out.shape[1] + 1, self.dim))
+		ct = self.param('ct', nn.initializers.normal(0.02), (1, 1, self.width)) # class token
+		mt = self.param('mt', nn.initializers.normal(0.02), (1, 1, self.width)) # mask token
+		epe = self.param('epe', nn.initializers.he_uniform(), (1, out.shape[1] + 1, self.width))
+		dpe = self.param('dpe', nn.initializers.he_uniform(), (1, out.shape[1] + 1, self.width))
 		out = jnp.concatenate((ct.repeat(out.shape[0], 0), out), axis=1)
-		out = out + pe
+		out = out + epe
 
 		mask = jrnd.permutation(self.key, jnp.arange(1, out.shape[1] + 1))
 		patches = out[:, mask[:int(out.shape[1] * (1 - self.masking_ratio))]]
@@ -62,23 +67,16 @@ class MAE(nn.Module):
 				ResidualPreNorm(FeedForward(self.dim_ffn))
 			]) for d in range(self.depth))])(patches)
 
-		out = mt.repeat(out.shape[0], 0).repeat(out.shape[1], 1)
+		out = mt.repeat(out.shape[0], 0).repeat(out.shape[1], 1) + dpe
 		out = out.at[:, mask[:int(out.shape[1] * (1 - self.masking_ratio))]].set(patches)
 
-		# decoder here
+		out = nn.Dense(self.dec_width)(out)
+		out = nn.Sequential([*(nn.Sequential([
+				ResidualPreNorm(MHDPAttention(self.dec_width, self.dec_heads)),
+				ResidualPreNorm(FeedForward(self.dec_width))
+			]) for d in range(self.depth))])(out)
 
+		out = out[:, 1:] # remove extra class token
+		out = nn.Dense(P * P * C)(out)
+		out = out.reshape(B, H, W, C)
 		return out
-
-
-
-
-f = MAE(jrnd.PRNGKey(42),
-	patch_size=16,
-	masking_ratio=0.75,
-	dim=64,
-	depth=4,
-	num_heads=3,
-	dim_heads=16,
-	dim_ffn=32)
-
-f.init(jrnd.PRNGKey(0), jnp.ones((8, 224, 224, 3)))
