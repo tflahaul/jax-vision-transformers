@@ -36,41 +36,49 @@ class MHDPAttention(nn.Module):
 class MAE(nn.Module):
 	key: jrnd.KeyArray
 	patch_size: int
+	masking_ratio: float
 	dim: int
-	enc_depth: int
-	enc_num_heads: int
-	enc_dim_heads: int
-	enc_dim_ffn: int
-	masking_ratio: float = 0.75
+	depth: int
+	num_heads: int
+	dim_heads: int
+	dim_ffn: int
 
 	@nn.compact
 	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
 		P = self.patch_size
 		out = nn.Conv(self.dim, (P, P), strides=P, use_bias=False)(inputs)
 		out = out.reshape(out.shape[0], -1, out.shape[3]) # [B, H, W, E] -> [B, P, E]
-		ct = self.param('ct', nn.initializers.he_uniform(), (1, 1, self.dim))
-		pe = self.param('pe', nn.initializers.he_uniform(), (1, out.shape[1] + 1, out.shape[2]))
+		ct = self.param('ct', nn.initializers.xavier_uniform(), (1, 1, self.dim)) # class token
+		mt = self.param('mt', nn.initializers.xavier_uniform(), (1, 1, self.dim)) # mask token
+		pe = self.param('pe', nn.initializers.xavier_uniform(), (1, out.shape[1] + 1, self.dim))
 		out = jnp.concatenate((ct.repeat(out.shape[0], 0), out), axis=1)
 		out = out + pe
 
 		mask = jrnd.permutation(self.key, jnp.arange(1, out.shape[1] + 1))
 		patches = out[:, mask[:int(out.shape[1] * (1 - self.masking_ratio))]]
 
-		patches = nn.Sequential([
-			*(nn.Sequential([
-				ResidualPreNorm(MHDPAttention(self.enc_dim_heads, self.enc_num_heads)),
-				ResidualPreNorm(FeedForward(self.enc_dim_ffn))
-			]) for _ in range(self.enc_depth))])(patches)
+		patches = nn.Sequential([*(nn.Sequential([
+				ResidualPreNorm(MHDPAttention(self.dim_heads, self.num_heads)),
+				ResidualPreNorm(FeedForward(self.dim_ffn))
+			]) for d in range(self.depth))])(patches)
+
+		out = mt.repeat(out.shape[0], 0).repeat(out.shape[1], 1)
+		out = out.at[:, mask[:int(out.shape[1] * (1 - self.masking_ratio))]].set(patches)
+
+		# decoder here
+
+		return out
 
 
 
 
-f = MAE(jrnd.PRNGKey(0),
+f = MAE(jrnd.PRNGKey(42),
 	patch_size=16,
+	masking_ratio=0.75,
 	dim=64,
-	enc_depth=4,
-	enc_num_heads=3,
-	enc_dim_heads=16,
-	enc_dim_ffn=32)
+	depth=4,
+	num_heads=3,
+	dim_heads=16,
+	dim_ffn=32)
 
-f.init(jrnd.PRNGKey(0), jnp.ones((1, 224, 224, 3)))
+f.init(jrnd.PRNGKey(0), jnp.ones((8, 224, 224, 3)))

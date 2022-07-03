@@ -47,7 +47,7 @@ class ViT(nn.Module):
 		out = nn.Conv(self.dim, kernel_size=(P, P), strides=P, use_bias=False)(inputs)
 		out = out.reshape(out.shape[0], -1, out.shape[3]) # [B, H, W, E] -> [B, L, E]
 		ct = self.param('ct', nn.initializers.he_uniform(), (1, 1, self.dim))
-		pe = self.param('pe', nn.initializers.he_uniform(), (1, out.shape[1] + 1, out.shape[2]))
+		pe = self.param('pe', nn.initializers.he_uniform(), (1, out.shape[1] + 1, self.dim))
 		out = jnp.concatenate((ct.repeat(out.shape[0], 0), out), axis=1)
 		out = out + pe
 		out = nn.Sequential([
