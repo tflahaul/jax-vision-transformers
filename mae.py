@@ -7,7 +7,7 @@ class ResidualPreNorm(nn.Module):
 
 	@nn.compact
 	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
-		return self.func(nn.LayerNorm(epsilon=1e-9)(inputs)) + inputs
+		return self.func(nn.LayerNorm()(inputs)) + inputs
 
 class FeedForward(nn.Module):
 	dim: int
@@ -45,6 +45,7 @@ class MAE(nn.Module):
 	dec_depth: int
 	dec_width: int
 	dec_heads: int
+	dec_ffn_dim: int
 
 	@nn.compact
 	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
@@ -53,29 +54,28 @@ class MAE(nn.Module):
 		out = nn.Conv(self.width, (P, P), strides=P, use_bias=False)(inputs)
 		out = out.reshape(out.shape[0], -1, out.shape[3]) # [B, H, W, E] -> [B, P, E]
 		ct = self.param('ct', nn.initializers.normal(0.02), (1, 1, self.width)) # class token
-		mt = self.param('mt', nn.initializers.normal(0.02), (1, 1, self.width)) # mask token
 		epe = self.param('epe', nn.initializers.he_uniform(), (1, out.shape[1] + 1, self.width))
-		dpe = self.param('dpe', nn.initializers.he_uniform(), (1, out.shape[1] + 1, self.width))
 		out = jnp.concatenate((ct.repeat(out.shape[0], 0), out), axis=1)
 		out = out + epe
 
 		mask = jrnd.permutation(self.key, jnp.arange(1, out.shape[1] + 1))
 		patches = out[:, mask[:int(out.shape[1] * (1 - self.masking_ratio))]]
-
 		patches = nn.Sequential([*(nn.Sequential([
 				ResidualPreNorm(MHDPAttention(self.dim_heads, self.num_heads)),
 				ResidualPreNorm(FeedForward(self.dim_ffn))
 			]) for d in range(self.depth))])(patches)
 
-		out = mt.repeat(out.shape[0], 0).repeat(out.shape[1], 1) + dpe
+		mt = self.param('mt', nn.initializers.normal(0.02), (1, 1, self.width)) # mask token
+		dpe = self.param('dpe', nn.initializers.he_uniform(), (1, out.shape[1] + 1, self.width))
+		out = mt.repeat(out.shape[0], 0).repeat(out.shape[1], 1)
 		out = out.at[:, mask[:int(out.shape[1] * (1 - self.masking_ratio))]].set(patches)
+		out = out + dpe
 
 		out = nn.Dense(self.dec_width)(out)
 		out = nn.Sequential([*(nn.Sequential([
 				ResidualPreNorm(MHDPAttention(self.dec_width, self.dec_heads)),
-				ResidualPreNorm(FeedForward(self.dec_width))
+				ResidualPreNorm(FeedForward(self.dec_ffn_dim))
 			]) for d in range(self.depth))])(out)
-
 		out = out[:, 1:] # remove extra class token
 		out = nn.Dense(P * P * C)(out)
 		out = out.reshape(B, H, W, C)
