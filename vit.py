@@ -6,7 +6,7 @@ class ResidualPreNorm(nn.Module):
 
 	@nn.compact
 	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
-		return self.func(nn.LayerNorm(epsilon=1e-9)(inputs)) + inputs
+		return self.func(nn.LayerNorm()(inputs)) + inputs
 
 class FeedForward(nn.Module):
 	dim: int
@@ -50,8 +50,7 @@ class ViT(nn.Module):
 		pe = self.param('pe', nn.initializers.he_uniform(), (1, out.shape[1] + 1, self.dim))
 		out = jnp.concatenate((ct.repeat(out.shape[0], 0), out), axis=1)
 		out = out + pe
-		out = nn.Sequential([
-			*(nn.Sequential([
+		out = nn.Sequential([*(nn.Sequential([
 				ResidualPreNorm(MHDPAttention(self.dim_heads, self.num_heads)),
 				ResidualPreNorm(FeedForward(self.dim_ffn))
 			]) for d in range(self.depth))])(out)
