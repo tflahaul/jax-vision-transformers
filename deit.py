@@ -1,3 +1,7 @@
+import functools
+import optax
+import jax
+
 from flax import linen as nn
 from jax import numpy as jnp
 
@@ -58,3 +62,18 @@ class DeiT(nn.Module):
 		cls = nn.Dense(self.out_features)(cls)
 		dis = nn.Dense(self.out_features)(out[:, -1])
 		return cls, dis
+
+
+
+@functools.partial(jax.jit)
+def kl_divergence(y: jnp.DeviceArray, y_hat: jnp.DeviceArray) -> jnp.DeviceArray:
+	return jnp.sum(jnp.exp(y) * (y - y_hat), -1)
+
+@functools.partial(jax.jit, static_argnames=('temp', 'alpha'))
+def soft_distillation_loss(y: jnp.DeviceArray, y_s: jnp.DeviceArray, y_t: jnp.DeviceArray, temp: float, alpha: float) -> jnp.DeviceArray:
+	div = kl_divergence(jax.nn.softmax(y_t / temp), jax.nn.softmax(y_s / temp)) * (temp ** 2)
+	return ((1 - alpha) * optax.softmax_cross_entropy(y_s, y)) + (div * alpha)
+
+@functools.partial(jax.jit)
+def hard_distillation_loss(y: jnp.DeviceArray, y_s: jnp.DeviceArray, y_t: jnp.DeviceArray) -> jnp.DeviceArray:
+	return (optax.softmax_cross_entropy(y_s, y) + optax.softmax_cross_entropy(y_s, y_t)) / 2
