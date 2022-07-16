@@ -18,8 +18,9 @@ class FeedForward(nn.Module):
 		out = nn.Dense(inputs.shape[-1])(out)
 		return out
 
-class ConvpassAdapter(nn.Module):
+class ConvolutionalBypass(nn.Module):
 	hidden_dim: int
+	coef: float
 	func: nn.Module
 
 	@nn.compact
@@ -29,10 +30,12 @@ class ConvpassAdapter(nn.Module):
 		out = nn.Conv(H, (1, 1), padding='same')(inputs)
 		out = nn.gelu(out)
 		x = nn.Conv(H, (3, 3), padding='same')(out[:, 1:].reshape(B, P, P, H))
+		c = nn.Conv(H, (1, 1))(out[:, None, None, 0])
 		out = out.at[:, 1:].set(x.reshape(B, L - 1, H))
+		out = out.at[:, 0].set(c.reshape(B, H))
 		out = nn.gelu(out)
 		out = nn.Conv(E, (1, 1), padding='same')(out)
-		return out + self.func(inputs)
+		return (self.coef * out) + self.func(inputs)
 
 class MHDPAttention(nn.Module):
 	num_heads: int
@@ -47,14 +50,15 @@ class MHDPAttention(nn.Module):
 		out = nn.Dense(E, use_bias=False)(out)
 		return out
 
-class ConvpassViT(nn.Module):
+class ConvPassViT(nn.Module):
 	patch_size: int
 	out_features: int
 	width: int
 	depth: int
 	num_heads: int
 	dim_ffn: int
-	dim_adapter: int
+	convp_dim: int
+	convp_coef: float = 1.0
 
 	@nn.compact
 	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
@@ -66,8 +70,8 @@ class ConvpassViT(nn.Module):
 		out = jnp.concatenate((ct.repeat(out.shape[0], axis=0), out), axis=1)
 		out = out + pe
 		out = nn.Sequential([*(nn.Sequential([
-				ResidualPreNorm(ConvpassAdapter(self.dim_adapter, MHDPAttention(self.num_heads))),
-				ResidualPreNorm(ConvpassAdapter(self.dim_adapter, FeedForward(self.dim_ffn)))
+				ResidualPreNorm(ConvolutionalBypass(self.convp_dim, self.convp_coef, MHDPAttention(self.num_heads))),
+				ResidualPreNorm(FeedForward(self.dim_ffn))
 			]) for d in range(self.depth))])(out)
 		out = nn.Dense(self.dim_ffn)(out[:, 0]) # class token
 		out = nn.tanh(out)
