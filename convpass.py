@@ -27,14 +27,14 @@ class ConvolutionalBypass(nn.Module):
 	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
 		B, L, E = inputs.shape
 		P, H = int((L - 1) ** 0.5), self.hidden_dim
-		out = nn.Conv(H, (1, 1), padding='same')(inputs)
+		out = nn.Conv(H, kernel_size=(1, 1))(out)
 		out = nn.gelu(out)
-		x = nn.Conv(H, (3, 3), padding='same')(out[:, 1:].reshape(B, P, P, H))
-		c = nn.Conv(H, (1, 1))(out[:, None, None, 0])
-		out = out.at[:, 1:].set(x.reshape(B, L - 1, H))
+		c = nn.Conv(H, kernel_size=(1, 1))(out[:, None, None, 0])
+		x = nn.Conv(H, kernel_size=(3, 3), padding='same')(out[:, 1:].reshape(B, P, P, H))
 		out = out.at[:, 0].set(c.reshape(B, H))
+		out = out.at[:, 1:].set(x.reshape(B, L - 1, H))
 		out = nn.gelu(out)
-		out = nn.Conv(E, (1, 1), padding='same')(out)
+		out = nn.Conv(E, kernel_size=(1, 1))(out)
 		return (self.coef * out) + self.func(inputs)
 
 class MHDPAttention(nn.Module):
