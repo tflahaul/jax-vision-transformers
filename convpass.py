@@ -23,16 +23,17 @@ class ConvolutionalBypass(nn.Module):
 	coef: float
 	func: nn.Module
 
+	def setup(self) -> None:
+		self.hidden_conv = nn.Conv(self.hidden_dim, (3, 3), padding='same')
+
 	@nn.compact
 	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
 		B, L, E = inputs.shape
-		P, H = int((L - 1) ** 0.5), self.hidden_dim
-		out = nn.Conv(H, kernel_size=(1, 1))(out)
+		H, P = self.hidden_dim, int((L - 1) ** 0.5)
+		out = nn.Conv(H, kernel_size=(1, 1))(inputs)
 		out = nn.gelu(out)
-		c = nn.Conv(H, kernel_size=(1, 1))(out[:, None, None, 0])
-		x = nn.Conv(H, kernel_size=(3, 3), padding='same')(out[:, 1:].reshape(B, P, P, H))
-		out = out.at[:, 0].set(c.reshape(B, H))
-		out = out.at[:, 1:].set(x.reshape(B, L - 1, H))
+		out = out.at[:, 0].set(self.hidden_conv(out[:, None, None, 0]).reshape(B, H))
+		out = out.at[:, 1:].set(self.hidden_conv(out[:, 1:].reshape(B, P, P, H)).reshape(B, L - 1, H))
 		out = nn.gelu(out)
 		out = nn.Conv(E, kernel_size=(1, 1))(out)
 		return (self.coef * out) + self.func(inputs)
