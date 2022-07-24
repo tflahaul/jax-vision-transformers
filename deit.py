@@ -40,7 +40,7 @@ class DeiT(nn.Module):
 	out_features: int
 	width: int
 	depth: int
-	num_heads: int    
+	num_heads: int
 	dim_ffn: int
 
 	@nn.compact

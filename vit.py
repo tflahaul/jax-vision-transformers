@@ -36,7 +36,7 @@ class ViT(nn.Module):
 	out_features: int
 	width: int
 	depth: int
-	num_heads: int    
+	num_heads: int
 	dim_ffn: int
 
 	@nn.compact
@@ -52,8 +52,7 @@ class ViT(nn.Module):
 				ResidualPreNorm(MHDPAttention(self.num_heads)),
 				ResidualPreNorm(FeedForward(self.dim_ffn))
 			]) for d in range(self.depth))])(out)
-		out = out[:, 0]
-		out = nn.Dense(self.dim_ffn)(out)
+		out = nn.Dense(self.dim_ffn)(out[:, 0]) # class token
 		out = nn.tanh(out)
 		out = nn.Dense(self.out_features)(out)
 		return out
