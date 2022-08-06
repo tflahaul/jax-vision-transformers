@@ -14,12 +14,11 @@ class FeedForward(nn.Module):
 
 	@nn.compact
 	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
-		filters = inputs.shape[-1]
-		out = nn.Conv(filters * 2, (1, 1), use_bias=False)(inputs)
-		out = nn.BatchNorm(self.training, scale_init=nn.initializers.zeros, use_bias=False)(out)
+		out = nn.Dense(inputs.shape[-1] * 2, use_bias=False)(inputs)
+		out = nn.BatchNorm(self.training, bias_init=nn.initializers.zeros)(out)
 		out = nn.hard_swish(out)
-		out = nn.Conv(filters, (1, 1), use_bias=False)(out)
-		out = nn.BatchNorm(self.training, scale_init=nn.initializers.zeros, use_bias=False)(out)
+		out = nn.Dense(inputs.shape[-1], use_bias=False)(out)
+		out = nn.BatchNorm(self.training, bias_init=nn.initializers.zeros)(out)
 		return out
 
 class LeViTAttention(nn.Module):
@@ -30,13 +29,13 @@ class LeViTAttention(nn.Module):
 	@nn.compact
 	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
 		B, H, W, C = inputs.shape
-		attn_b = self.param('bias', nn.initializers.normal(0.02), (1, 1, H * W, H * W))
-		out = nn.Conv(self.num_heads * self.dim * 4, (1, 1), use_bias=False)(inputs)
+		D = self.dim * self.num_heads
+		attn_b = self.param('bias', nn.initializers.zeros, (1, 1, H * W, H * W)) # !
+		out = nn.Conv(D * (3 + 1), (1, 1), use_bias=False)(inputs)
 		out = nn.BatchNorm(self.training, scale_init=nn.initializers.zeros, use_bias=False)(out)
-		q, k, v1, v2 = (x.reshape(B, H * W, self.num_heads, self.dim).transpose(0, 2, 1, 3) for x in out.split(4, -1))
-		v = jnp.concatenate((v1, v2), -1) # [HW, 2D]
-		out = nn.softmax(jnp.matmul(q, jnp.moveaxis(k, 2, 3)) + attn_b)
-		out = nn.hard_swish(jnp.matmul(out, v)).transpose((0, 2, 1, 3)).reshape(B, H, W, -1)
+		q, k, v = (x.reshape(B, H * W, self.num_heads, -1).swapaxes(1, 2) for x in out.split((D, D * 2), -1))
+		out = nn.softmax((jnp.matmul(q, jnp.moveaxis(k, 2, 3)) / jnp.sqrt(self.dim)) + attn_b)
+		out = nn.hard_swish(jnp.matmul(out, v)).swapaxes(1, 2).reshape(B, H, W, -1)
 		out = nn.Conv(C, (1, 1), use_bias=False)(out)
 		return out
 
@@ -50,7 +49,7 @@ class LeViT(nn.Module):
 
 	@nn.compact
 	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
-		B, H, W, _ = inputs.shape
+		B, H, W, _ = inputs.shape # [B, 224, 224, 3]
 		out = nn.Sequential([*(nn.Conv(C, (3, 3), strides=2) for C in self.filters)])(inputs)
 		out = nn.Sequential([*(nn.Sequential([ # stage 1
 				Residual(LeViTAttention(self.width, self.stage_heads[0], self.training)),
