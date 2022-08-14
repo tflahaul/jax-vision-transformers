@@ -25,9 +25,9 @@ class MHDPAttention(nn.Module):
 	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
 		B, L, E = inputs.shape
 		out = nn.Dense(self.num_heads * E * 3, use_bias=False)(inputs)
-		q, k, v = (x.reshape(B, L, self.num_heads, E).transpose((0, 2, 1, 3)) for x in out.split(3, -1))
-		out = nn.softmax(jnp.matmul(q, jnp.moveaxis(k, 2, 3)) / jnp.sqrt(E))
-		out = jnp.matmul(out, v).transpose((0, 2, 1, 3)).reshape(B, L, -1)
+		q, k, v = (x.reshape(B, L, self.num_heads, E).swapaxes(1, 2) for x in out.split(3, -1))
+		attn = nn.softmax(jnp.matmul(q, k.swapaxes(2, 3)) * (1 / jnp.sqrt(E)))
+		out = jnp.matmul(attn, v).swapaxes(1, 2).reshape(B, L, -1)
 		out = nn.Dense(E, use_bias=False)(out)
 		return out
 
