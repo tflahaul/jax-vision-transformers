@@ -6,7 +6,7 @@ class ResidualPreNorm(nn.Module):
 
 	@nn.compact
 	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
-		return self.func(nn.LayerNorm()(inputs)) + inputs
+		return self.func(nn.LayerNorm(1e-9)(inputs)) + inputs
 
 class FeedForward(nn.Module):
 	dim: int
@@ -20,13 +20,16 @@ class FeedForward(nn.Module):
 
 class MHDPAttention(nn.Module):
 	num_heads: int
+	enable_dropout: bool
+	dropout_rate: float
 
 	@nn.compact
 	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
 		B, L, E = inputs.shape
 		out = nn.Dense(self.num_heads * E * 3, use_bias=False)(inputs)
 		q, k, v = (x.reshape(B, L, self.num_heads, E) for x in out.split(3, -1))
-		attn = nn.softmax(jnp.einsum('bqhd,bkhd->bhqk', q, k, optimize=True) * (1 / jnp.sqrt(E)))
+		attn = nn.softmax(jnp.einsum('bqhd,bkhd->bhqk', q, k, optimize=True) * (E ** -0.5))
+		attn = nn.Dropout(self.dropout_rate, (), (not self.enable_dropout))(attn)
 		out = jnp.einsum('bhwd,bdhv->bwhv', attn, v, optimize=True)
 		out = nn.Dense(E, use_bias=False)(out.reshape(B, L, -1))
 		return out
@@ -38,6 +41,8 @@ class ViT(nn.Module):
 	depth: int
 	num_heads: int
 	dim_ffn: int
+	enable_dropout: bool = False
+	dropout_rate: float = 0.1
 
 	@nn.compact
 	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
@@ -49,7 +54,7 @@ class ViT(nn.Module):
 		out = jnp.concatenate((ct.repeat(out.shape[0], axis=0), out), axis=1)
 		out = out + pe
 		out = nn.Sequential([*(nn.Sequential([
-				ResidualPreNorm(MHDPAttention(self.num_heads)),
+				ResidualPreNorm(MHDPAttention(self.num_heads, self.enable_dropout, self.dropout_rate)),
 				ResidualPreNorm(FeedForward(self.dim_ffn))
 			]) for d in range(self.depth))])(out)
 		out = nn.Dense(self.dim_ffn)(out[:, 0]) # class token
