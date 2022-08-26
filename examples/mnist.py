@@ -1,0 +1,64 @@
+import tensorflow_datasets as tfds
+import optax
+import time
+import jax
+
+from flax.training import train_state, checkpoints
+from functools import partial
+from flax import linen as nn
+from jax import numpy as jnp
+
+from pathlib import Path
+from sys import path as p
+p.append(str(Path(__file__).resolve().parents[1]))
+from vit import ViT
+
+LEARNING_RATE = 0.01
+MOMENTUM = 0.9
+MAX_ITER = 6
+BATCH_SIZE = 256
+CKPT_DIR = 'models'
+
+train_set = tfds.as_numpy(tfds.load('mnist', split='train', batch_size=BATCH_SIZE, as_supervised=True))
+test_set = tfds.as_numpy(tfds.load('mnist', split='test', batch_size=-1, as_supervised=True))
+
+@jax.jit
+def apply_model(state, images, labels, key):
+	def loss_fn(parameters):
+		out = state.apply_fn(parameters, images, rngs={'dropout': key})
+		loss = jnp.mean(optax.softmax_cross_entropy(out, jax.nn.one_hot(labels, 10)))
+		return loss
+	grad_fn = jax.value_and_grad(loss_fn)
+	return grad_fn(state.params)
+
+@partial(jax.jit, static_argnames='infer_fn')
+def accuracy(parameters, infer_fn) -> float:
+	return jnp.mean(jnp.argmax(infer_fn(parameters, test_set[0]), -1) == test_set[1])
+
+def create_train_state(rng: jax.random.KeyArray, f: nn.Module):
+	parameters = jax.jit(f.init)(rng, jnp.ones((1, 28, 28, 1)))
+	optimizer = optax.sgd(LEARNING_RATE, momentum=MOMENTUM)
+	return train_state.TrainState.create(
+		apply_fn=f.apply,
+		params=parameters,
+		tx=optimizer)
+
+def main() -> None:
+	train_fn = ViT(28, 10, 48, 3, 8, 192, enable_dropout=True, dropout_rate=0.1)
+	infer_fn = ViT(28, 10, 48, 3, 8, 192, enable_dropout=False).apply
+	key_p, key_d = jax.random.split(jax.random.PRNGKey(seed=3407))
+	state = create_train_state({'params': key_p, 'dropout': key_d}, train_fn)
+	print(f'Number of parameters: {sum(x.size for x in jax.tree_util.tree_leaves(state.params))}')
+	for epoch in range(1, MAX_ITER + 1):
+		running_loss, start = 0, time.time()
+		for images, labels in train_set:
+			loss, gradients = apply_model(state, images, labels, key_d)
+			state = state.apply_gradients(grads=gradients)
+			_, key_d = jax.random.split(key_d)
+			running_loss = running_loss + loss
+		acc = accuracy(state.params, infer_fn)
+		print(f'epoch {epoch:>2d}/{MAX_ITER}| loss={running_loss:.4f}, accuracy={acc:.3f}, time={time.time() - start:.2f}')
+	print(f'Saved {checkpoints.save_checkpoint(CKPT_DIR, state, 0, overwrite=True)}')
+
+if __name__ == '__main__':
+	main()
