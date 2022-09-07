@@ -8,10 +8,7 @@ from functools import partial
 from flax import linen as nn
 from jax import numpy as jnp
 
-from pathlib import Path
-from sys import path as p
-p.append(str(Path(__file__).resolve().parents[1]))
-from vit import ViT
+from jvt import ViT
 
 LEARNING_RATE = 0.01
 MOMENTUM = 0.9

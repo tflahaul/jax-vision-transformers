@@ -1,7 +1,15 @@
 # jax-vision-transformers
 Vision transformers with JAX &amp; Flax
 
-Made this project mostly to get better with transformers and eventually learn JAX + Flax
+### Installation
+```sh
+pip3 install git+https://github.com/tflahaul/jax-vision-transformers
+```
+
+### Usage example
+```py
+from jvt import DeiT
+```
 
 ##
 
