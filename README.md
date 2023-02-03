@@ -2,8 +2,9 @@
 Vision transformers with JAX &amp; Flax
 
 ### Installation
+
 ```sh
-pip3 install git+https://github.com/tflahaul/jax-vision-transformers
+pip install jvt
 ```
 
 ### Usage example
