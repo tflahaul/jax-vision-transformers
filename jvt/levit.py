@@ -1,12 +1,13 @@
 from flax import linen as nn
 from jax import numpy as jnp
+from jax import Array
 from typing import Sequence
 
 class Residual(nn.Module):
 	func: nn.Module
 
 	@nn.compact
-	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
+	def __call__(self, inputs: Array) -> Array:
 		return self.func(inputs) + inputs
 
 class FeedForward(nn.Module):
@@ -14,7 +15,7 @@ class FeedForward(nn.Module):
 	training: bool = False
 
 	@nn.compact
-	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
+	def __call__(self, inputs: Array) -> Array:
 		out = nn.Dense(inputs.shape[-1] * self.scale_factor, use_bias=False)(inputs)
 		out = nn.BatchNorm(self.training, bias_init=nn.initializers.zeros)(out)
 		out = nn.hard_swish(out)
@@ -28,13 +29,13 @@ class LeViT_MHDPAttention(nn.Module):
 	training: bool = False
 
 	@nn.compact
-	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
+	def __call__(self, inputs: Array) -> Array:
 		B, H, W, C = inputs.shape
 		D = self.dim * self.num_heads
 		attn_b = self.param('bias', nn.initializers.zeros, (1, 1, H * W, H * W)) # !
 		out = nn.Dense(D * (3 + 1), use_bias=False)(inputs)
 		out = nn.BatchNorm(self.training, scale_init=nn.initializers.ones, use_bias=False)(out)
-		q, k, v = (x.reshape(B, H * W, self.num_heads, -1).swapaxes(1, 2) for x in out.split((D, D * 2), -1))
+		q, k, v = (x.reshape(B, H * W, self.num_heads, -1).swapaxes(1, 2) for x in out._split((D, D * 2), -1))
 		out = nn.softmax((jnp.matmul(q, k.swapaxes(2, 3)) / jnp.sqrt(self.dim)) + attn_b)
 		out = jnp.matmul(out, v).swapaxes(1, 2).reshape(B, H, W, -1)
 		out = nn.Dense(C, use_bias=False)(nn.hard_swish(out))
@@ -47,14 +48,14 @@ class LeViT_SubsampleAttention(nn.Module):
 	training: bool = False
 
 	@nn.compact
-	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
+	def __call__(self, inputs: Array) -> Array:
 		B, H, W, _ = inputs.shape
 		D = self.dim * self.num_heads
 		out_hw = (((H - 1) // 2) + 1)
 		attn_b = self.param('bias', nn.initializers.zeros, (1, 1, out_hw ** 2, H * W)) # !
 		out = nn.Dense(D * (2 + 3), use_bias=False)(inputs)
 		out = nn.BatchNorm(self.training, scale_init=nn.initializers.ones, use_bias=False)(out)
-		k, v = (x.reshape(B, H * W, self.num_heads, -1).swapaxes(1, 2) for x in out.split((D,), -1))
+		k, v = (x.reshape(B, H * W, self.num_heads, -1).swapaxes(1, 2) for x in out._split((D,), -1))
 		q = nn.avg_pool(inputs, window_shape=(1, 1), strides=(2, 2))
 		q = nn.Dense(D, use_bias=False)(q)
 		q = nn.BatchNorm(self.training, scale_init=nn.initializers.ones, use_bias=False)(q)
@@ -76,7 +77,7 @@ class LeViT(nn.Module):
 	training: bool = False
 
 	@nn.compact
-	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
+	def __call__(self, inputs: Array) -> Array:
 		B, H, W, C = inputs.shape # [B, 224, 224, 3]
 		out = nn.Sequential([*(nn.Conv(C, (3, 3), strides=2) for C in self.filters)])(inputs)
 		out = nn.Sequential([*(nn.Sequential([ # stage 1
