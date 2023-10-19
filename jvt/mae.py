@@ -1,5 +1,6 @@
 from jax import random as jrnd
 from jax import numpy as jnp
+from jax import Array
 from flax import linen as nn
 from typing import Sequence
 
@@ -7,14 +8,14 @@ class ResidualPreNorm(nn.Module):
 	func: nn.Module
 
 	@nn.compact
-	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
+	def __call__(self, inputs: Array) -> Array:
 		return self.func(nn.LayerNorm()(inputs)) + inputs
 
 class FeedForward(nn.Module):
 	dim: int
 
 	@nn.compact
-	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
+	def __call__(self, inputs: Array) -> Array:
 		out = nn.Dense(self.dim)(inputs)
 		out = nn.gelu(out)
 		out = nn.Dense(inputs.shape[-1])(out)
@@ -24,10 +25,10 @@ class MHDPAttention(nn.Module):
 	num_heads: int
 
 	@nn.compact
-	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
+	def __call__(self, inputs: Array) -> Array:
 		B, L, E = inputs.shape
 		out = nn.Dense(self.num_heads * E * 3, use_bias=False)(inputs)
-		q, k, v = (x.reshape(B, L, self.num_heads, E) for x in out.split(3, -1))
+		q, k, v = (x.reshape(B, L, self.num_heads, E) for x in out._split(3, -1))
 		attn = nn.softmax(jnp.einsum('bqhd,bkhd->bhqk', q, k, optimize=True) * (1 / jnp.sqrt(E)))
 		out = jnp.einsum('bhwd,bdhv->bwhv', attn, v, optimize=True)
 		out = nn.Dense(E, use_bias=False)(out.reshape(B, L, -1))
@@ -43,7 +44,7 @@ class MaskedEncoder(nn.Module):
 	dim_ffn: int
 
 	@nn.compact
-	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
+	def __call__(self, inputs: Array) -> Array:
 		P = self.patch_size
 		out = nn.Conv(self.width, (P, P), strides=P, use_bias=False)(inputs)
 		out = out.reshape(out.shape[0], -1, out.shape[3]) # [B, H, W, E] -> [B, P, E]
@@ -70,7 +71,7 @@ class MaskedDecoder(nn.Module):
 	dim_ffn: int
 
 	@nn.compact
-	def __call__(self, patches: jnp.DeviceArray, mask: jnp.DeviceArray) -> jnp.DeviceArray:
+	def __call__(self, patches: Array, mask: Array) -> Array:
 		B, N, E = self.embeddings_shape
 		mt = self.param('mt', nn.initializers.normal(0.02), (1, 1, E)) # mask token
 		pe = self.param('pe', nn.initializers.normal(0.02), (1, N, E))
@@ -101,7 +102,7 @@ class MAE(nn.Module):
 	dec_ffn_dim: int
 
 	@nn.compact
-	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
+	def __call__(self, inputs: Array) -> Array:
 		tokens, mask, embeddings_shape = MaskedEncoder(
 			self.key,
 			self.patch_size,

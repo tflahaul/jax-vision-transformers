@@ -1,3 +1,5 @@
+# You need to have tensorflow and tensorflow-datasets installed to run this example
+
 import tensorflow_datasets as tfds
 import optax
 import time
@@ -10,8 +12,7 @@ from jax import numpy as jnp
 
 from jvt import ViT
 
-LEARNING_RATE = 2e-3
-MOMENTUM = 0.9
+LEARNING_RATE = 2e-4
 MAX_ITER = 8
 BATCH_SIZE = 256
 CKPT_DIR = 'checkpoints'
@@ -36,9 +37,9 @@ def accuracy(parameters, infer_fn) -> float:
 	return jnp.mean(jnp.argmax(infer_fn(parameters, images), -1) == labels)
 
 
-def create_train_state(rng: jax.random.KeyArray, f: nn.Module):
+def create_train_state(rng: jax.Array, f: nn.Module):
 	parameters = jax.jit(f.init)(rng, jnp.ones((1, 28, 28, 1)))
-	optimizer = optax.sgd(LEARNING_RATE, momentum=MOMENTUM)
+	optimizer = optax.lion(LEARNING_RATE)
 	return train_state.TrainState.create(
 		apply_fn=jax.jit(f.apply),
 		params=parameters,

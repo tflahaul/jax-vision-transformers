@@ -1,18 +1,19 @@
 from flax import linen as nn
 from jax import numpy as jnp
+from jax import Array
 
 class ResidualPreNorm(nn.Module):
 	func: nn.Module
 
 	@nn.compact
-	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
+	def __call__(self, inputs: Array) -> Array:
 		return self.func(nn.LayerNorm(1e-9)(inputs)) + inputs
 
 class FeedForward(nn.Module):
 	dim: int
 
 	@nn.compact
-	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
+	def __call__(self, inputs: Array) -> Array:
 		out = nn.Dense(self.dim)(inputs)
 		out = nn.gelu(out)
 		out = nn.Dense(inputs.shape[-1])(out)
@@ -24,10 +25,10 @@ class MHDPAttention(nn.Module):
 	dropout_rate: float
 
 	@nn.compact
-	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
+	def __call__(self, inputs: Array) -> Array:
 		B, L, E = inputs.shape
 		out = nn.Dense(self.num_heads * E * 3, use_bias=False)(inputs)
-		q, k, v = (x.reshape(B, L, self.num_heads, E) for x in out.split(3, -1))
+		q, k, v = (x.reshape(B, L, self.num_heads, E) for x in out._split(3, -1))
 		attn = nn.softmax(jnp.einsum('bqhd,bkhd->bhqk', q, k, optimize=True) * (E ** -0.5))
 		attn = nn.Dropout(self.dropout_rate, (), (not self.enable_dropout))(attn)
 		out = jnp.einsum('bhwd,bdhv->bwhv', attn, v, optimize=True)
@@ -45,7 +46,7 @@ class ViT(nn.Module):
 	dropout_rate: float = 0.1
 
 	@nn.compact
-	def __call__(self, inputs: jnp.DeviceArray) -> jnp.DeviceArray:
+	def __call__(self, inputs: Array) -> Array:
 		P = self.patch_size
 		out = nn.Conv(self.width, kernel_size=(P, P), strides=P, use_bias=False)(inputs)
 		out = out.reshape(out.shape[0], -1, out.shape[3]) # [B, H, W, E] -> [B, L, E]
