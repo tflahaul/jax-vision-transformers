@@ -4,7 +4,7 @@ setup(
 	name='jvt',
 	author='Thomas Flahault',
 	description='Vision transformers with JAX & Flax',
-	version='9.7.22',
+	version='0.1.0',
 	url='https://github.com/tflahaul/jax-vision-transformers',
 	packages=find_packages(exclude=['examples']),
 	install_requires=['jaxlib', 'jax', 'flax', 'optax'],
